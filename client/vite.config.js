@@ -7,8 +7,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': 'http://grn.salestracker.in:5000',
-      '/socket.io': { target: 'http://grn.salestracker.in:5000', ws: true },
+      '/api': 'http://grn.salestracker.in:5006',
+      '/socket.io': { target: 'http://grn.salestracker.in:5006', ws: true },
     },
   },
 });
