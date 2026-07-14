@@ -42,23 +42,25 @@ pdf.js and SheetJS load from CDN in `client/index.html`, so the Vite bundle stay
 Two processes — the API (:5000) and the Vite dev server (:5173, which proxies `/api` and the websocket to :5000).
 
 ```bash
-npm run install:all        # installs server + client deps
-docker compose up -d       # starts MongoDB (or point MONGODB_URI at your own)
-cp .env.example .env        # then change JWT_SECRET
-npm run seed               # creates the first admin (admin / admin123 by default)
-npm run dev                # runs API + client together
+npm run install:all              # installs server + client deps
+docker compose up -d             # starts MongoDB (or point MONGODB_URI at your own)
+cp .env.example .env              # then change JWT_SECRET
+npm run seed -- <user> <pass>    # creates the first admin (stored hashed in MongoDB)
+npm run dev                      # runs API + client together
 ```
 
-Open http://localhost:5173. Log in as `admin` / `admin123`, change the password (top bar), then add dock/purchase users under **Users**, and load your catalog under **Master data**.
+The admin username/password are passed to `seed` (or it prompts if you omit them) and stored — hashed — in MongoDB; they are **not** kept in `.env`. Login always authenticates against the database.
+
+Open http://localhost:5173. Log in with the admin you just created, change the password (top bar), then add dock/purchase users under **Users**, and load your catalog under **Master data**.
 
 ## Run it as one service (production)
 
 ```bash
 npm run install:all
 npm run build              # builds the React client into client/dist
-cp .env.example .env        # set MONGODB_URI, JWT_SECRET, ADMIN_*
-npm run seed
-npm start                  # Express serves the API AND the built client on PORT (5000)
+cp .env.example .env              # set MONGODB_URI, JWT_SECRET
+npm run seed -- <user> <pass>    # first admin → MongoDB (run once)
+npm start                        # Express serves the API AND the built client on PORT (5000)
 ```
 
 Open http://localhost:5000.
@@ -69,8 +71,8 @@ Any host that runs Node + MongoDB — Render, Railway, Fly.io, or a VM; use Mong
 
 1. Create a MongoDB Atlas cluster; copy its connection string.
 2. Deploy this repo as a web service with build `npm run install:all && npm run build` and start `npm start`.
-3. Set env vars: `MONGODB_URI`, `JWT_SECRET`, `ADMIN_USERNAME`, `ADMIN_PASSWORD` (`PORT` is usually provided).
-4. Run `npm run seed` once against production (one-off job/console).
+3. Set env vars: `MONGODB_URI`, `JWT_SECRET` (`PORT` is usually provided).
+4. Run `npm run seed -- <user> <pass>` once against production (one-off job/console) to create the first admin.
 
 **LAN-only?** Run the production steps on a machine on your warehouse network and share its local IP (e.g. `http://192.168.1.50:5000`).
 

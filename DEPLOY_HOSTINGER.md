@@ -68,19 +68,23 @@ Set at least:
 - `JWT_SECRET` — a long random string: `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`
 - `HOST=127.0.0.1` — so Node only listens for Nginx, not the public internet.
 - `PORT=5000`
-- `ADMIN_USERNAME` / `ADMIN_PASSWORD` — the first admin (change the password after login).
 - `CLIENT_ORIGIN` — your `https://your-domain.com` (or leave `*`).
+
+> The admin username/password are **not** put in `.env` — you pass them to the seed
+> in the next step, and they're stored hashed in MongoDB.
 
 ## 4. Install, build, seed
 
 ```bash
-npm install --omit=dev       # server production deps
-npm run build                # installs client devDeps + builds client/dist
-npm run seed                 # creates the first admin (run ONCE)
+npm install --omit=dev                 # server production deps
+npm run build                          # installs client devDeps + builds client/dist
+npm run seed -- <admin-user> <admin-pass>   # creates the first admin in MongoDB (run ONCE)
 ```
 
-`npm run seed` prints the admin credentials. If it says *"Users already exist"*,
-an admin is already in the database — skip it.
+Pass a real username/password to `seed` (password min 8 chars); it's hashed and
+stored in MongoDB — nothing is written to `.env`. If it says *"Users already
+exist"*, an admin is already in the database — skip it. Change the password after
+first login via the **Password** button.
 
 ## 5. Start under PM2
 
@@ -152,7 +156,7 @@ That pulls, reinstalls, rebuilds the client, and reloads PM2 with zero downtime.
 |---------|-------------|
 | `EADDRINUSE :::5000` | Another process holds 5000. `pm2 delete grn-desk` then start again, or `sudo lsof -i :5000` to find it. |
 | Server logs `querySrv ECONNREFUSED` | DNS can't resolve Atlas SRV. The app already retries via public DNS; also check the VPS IP is whitelisted in Atlas Network Access. |
-| Login says "Wrong username or password" on a fresh DB | Admin not created yet — run `npm run seed`. |
+| Login says "Wrong username or password" on a fresh DB | Admin not created yet — run `npm run seed -- <user> <pass>`. |
 | `MongooseError` / URI won't parse | Password not URL-encoded in `MONGODB_URI` (`@`→`%40`). |
 | Live updates (Socket.IO) not working | Nginx must forward the `Upgrade`/`Connection` headers — use the provided `nginx.conf.example`. |
 | 502 Bad Gateway | Node isn't running or crashed. `pm2 logs grn-desk`. |
