@@ -158,6 +158,7 @@ That pulls, reinstalls, rebuilds the client, and reloads PM2 with zero downtime.
 | Server logs `querySrv ECONNREFUSED` | DNS can't resolve Atlas SRV. The app already retries via public DNS; also check the VPS IP is whitelisted in Atlas Network Access. |
 | Login says "Wrong username or password" on a fresh DB | Admin not created yet — run `npm run seed -- <user> <pass>`. |
 | `MongooseError` / URI won't parse | Password not URL-encoded in `MONGODB_URI` (`@`→`%40`). |
+| Login returns **405 Not Allowed** (nginx), or `/api/...` returns the HTML page instead of JSON | Nginx isn't proxying `/api` to Node — it's serving the SPA fallback. Add the proxy blocks from `deploy/nginx.api-proxy.snippet.conf` (and make sure Node is running on 5000). |
 | Live updates (Socket.IO) not working | Nginx must forward the `Upgrade`/`Connection` headers — use the provided `nginx.conf.example`. |
 | 502 Bad Gateway | Node isn't running or crashed. `pm2 logs grn-desk`. |
 | Blank page / "Client not built yet" | Run `npm run build` (creates `client/dist`). |
