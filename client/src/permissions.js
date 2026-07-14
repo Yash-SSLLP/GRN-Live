@@ -4,7 +4,7 @@
 const FULL = { grn: 3, reports: 1, items: 3, racks: 3, vendors: 3, users: 3 };
 const MATRIX = {
   purchase: { grn: 3, reports: 1, items: 3, racks: 3, vendors: 3, users: 0 },
-  dock:     { grn: 3, reports: 1, items: 1, racks: 1, vendors: 1, users: 0 },
+  dock:     { grn: 2, reports: 1, items: 1, racks: 1, vendors: 1, users: 0 },
 };
 const LEVEL = { view: 1, edit: 2, add: 3 };
 

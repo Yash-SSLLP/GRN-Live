@@ -11,6 +11,9 @@ const { ensureMasters } = require('./ensureMasters');
 if (!process.env.JWT_SECRET) console.warn('⚠ JWT_SECRET is not set — using an insecure default. Set it before going live.');
 
 const app = express();
+// Behind Nginx (Hostinger VPS) the app sits one hop back, so trust the first
+// proxy — this makes req.ip / X-Forwarded-* accurate for the login throttle.
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 const ORIGIN = process.env.CLIENT_ORIGIN || '*';
 const io = new Server(server, { cors: { origin: ORIGIN } });
@@ -43,12 +46,21 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 5000;
+// In production bind to 127.0.0.1 (HOST=127.0.0.1) so only Nginx can reach the
+// Node process; unset = listen on all interfaces (handy for local/LAN dev).
+const HOST = process.env.HOST || undefined;
 connect()
   .then(async () => {
     // Self-heal the hardcoded master catalog before serving (additive, never deletes).
-    try { const r = await ensureMasters(); console.log(`✓ Master catalog ensured — ${r.products} items, ${r.racks} racks, ${r.vendors} vendors`); }
-    catch (e) { console.error('⚠ Could not ensure master catalog:', e.message); }
-    server.listen(PORT, () => console.log(`GRN Desk (MERN) on http://localhost:${PORT}`));
+    // The e2e test seeds its own tiny catalog and asserts exact counts, so it opts
+    // out via SKIP_MASTER_SEED to keep its in-memory DB isolated.
+    if (process.env.SKIP_MASTER_SEED === '1') {
+      console.log('• Master catalog seed skipped (SKIP_MASTER_SEED=1)');
+    } else {
+      try { const r = await ensureMasters(); console.log(`✓ Master catalog ensured — ${r.products} items, ${r.racks} racks, ${r.vendors} vendors`); }
+      catch (e) { console.error('⚠ Could not ensure master catalog:', e.message); }
+    }
+    server.listen(PORT, HOST, () => console.log(`GRN Desk (MERN) listening on ${HOST || '0.0.0.0'}:${PORT}`));
   })
   .catch((e) => { console.error('Mongo connection failed:', e.message); process.exit(1); });
 

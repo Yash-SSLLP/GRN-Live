@@ -10,6 +10,7 @@ const assert = (c, m) => { if (!c) { console.error('✗ FAIL:', m); process.exit
   process.env.MONGODB_URI = mongod.getUri();
   process.env.JWT_SECRET = 'test-secret';
   process.env.PORT = '5055';
+  process.env.SKIP_MASTER_SEED = '1'; // isolate the test DB from the shipped catalog
 
   require('./index'); // connects + listens
   const base = 'http://localhost:5055';

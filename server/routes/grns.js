@@ -5,7 +5,7 @@ const Counter = require('../models/Counter');
 const Product = require('../models/Product');
 const Rack = require('../models/Rack');
 const { authRequired } = require('../middleware/auth');
-const { perm } = require('../permissions');
+const { perm, can } = require('../permissions');
 const { norm, uniqList, shapeGrn, emitChange } = require('../helpers');
 
 const router = express.Router();
@@ -23,7 +23,7 @@ async function nextGrnNo() {
   let maxNum = 0;
   for (const d of docs) { const m = String(d.grnNo || '').match(/(\d+)\s*$/); if (m) { const n = parseInt(m[1], 10); if (n > maxNum) maxNum = n; } }
   if (seq <= maxNum) { seq = maxNum + 1; await Counter.updateOne({ _id: 'grn' }, { $set: { seq } }); }
-  return 'GRN-' + String(seq).padStart(3, '0');
+  return 'GRN-' + String(seq).padStart(5, '0');
 }
 
 // Learn/upsert the shared catalog when goods are received: bump usage and add
@@ -114,6 +114,11 @@ router.get('/:id', perm('grn', 'view'), async (req, res) => {
 
 router.patch('/:id', perm('grn', 'edit'), async (req, res) => {
   const { vendor, billNo, date, status } = req.body || {};
+  // Closing/reopening a GRN (status change) is a purchase/admin action — a level
+  // above the header/line edits a dock user may make. Header edits stay at 'edit'.
+  if (status !== undefined && !can(req.user.role, 'grn', 'add')) {
+    return res.status(403).json({ error: 'You do not have permission for this.' });
+  }
   const r = await editGrn(req.params.id, (g) => {
     if (vendor !== undefined) g.vendor = vendor;
     if (billNo !== undefined) g.billNo = billNo;

@@ -1,4 +1,5 @@
 node_modules
 client/node_modules
 client/dist
+client/vite.config.js.timestamp-*.mjs
 .env

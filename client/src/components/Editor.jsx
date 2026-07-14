@@ -6,8 +6,8 @@ import ImportModal from './ImportModal.jsx';
 import RackSelect from './RackSelect.jsx';
 
 export default function Editor({ grn, setGrn, me, catalog, idx, vendors, racks, onBack, refreshMasters }) {
-  const canEdit = can(me, 'grn', 'edit');   // receive, import, mark received, header
-  const canAddDel = can(me, 'grn', 'add');  // create / delete GRN, delete lines
+  const canEdit = can(me, 'grn', 'edit');   // receive, import, edit header/lines
+  const canAddDel = can(me, 'grn', 'add');  // create / close / delete GRN, delete lines
   const [filter, setFilter] = useState('');
   const [expanded, setExpanded] = useState({});     // group key -> show its per-bin unload log
   const [addBin, setAddBin] = useState({});         // group key -> show the "add another rack + qty" form
@@ -216,7 +216,7 @@ export default function Editor({ grn, setGrn, me, catalog, idx, vendors, racks, 
         <button className="btn" onClick={exportCsv}>⬇ CSV</button>
         <button className="btn" onClick={printGrn}>🖨 Print</button>
         {canAddDel && <button className="btn danger sm" onClick={deleteGrn}>Delete</button>}
-        {canEdit && <button className="btn go" onClick={markDone}>{grn.status === 'done' ? '↺ Reopen' : '✓ Mark received'}</button>}
+        {canAddDel && <button className="btn go" onClick={markDone}>{grn.status === 'done' ? '↺ Reopen' : '✓ Mark received'}</button>}
       </div>
 
       <div className="doc">
