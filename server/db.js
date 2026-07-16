@@ -13,8 +13,17 @@ async function connect(uri) {
     if (servers.length) { try { dns.setServers(servers); } catch (e) { /* ignore */ } }
   }
   mongoose.set('strictQuery', true);
-  await mongoose.connect(target);
-  console.log('✓ MongoDB connected');
+  // Guarantee a database name. A URI like `…mongodb.net/?appName=…` (no name in
+  // the path) silently connects to `test`, so local and prod can end up reading
+  // different databases from the same cluster. When the path is empty, force the
+  // app's db (override via MONGODB_DB) so every environment lands on the same one.
+  const opts = {};
+  try {
+    const p = (new URL(target).pathname || '').replace(/^\//, '');
+    if (!p) opts.dbName = process.env.MONGODB_DB || 'grn';
+  } catch (e) { /* non-URL target — let mongoose handle it */ }
+  await mongoose.connect(target, opts);
+  console.log(`✓ MongoDB connected → db "${mongoose.connection.name}"`);
 }
 
 module.exports = { connect, mongoose };
