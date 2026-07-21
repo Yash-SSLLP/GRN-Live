@@ -3,7 +3,11 @@
     "allow": [
       "Bash(node -e ' *)",
       "Bash(node multi-test.js)",
-      "Bash(npm --prefix client run build)"
+      "Bash(npm --prefix client run build)",
+      "Bash(git fetch *)",
+      "Bash(xargs git log --oneline -1)",
+      "Bash(git merge-tree *)",
+      "Bash(git ls-tree *)"
     ]
   }
 }
