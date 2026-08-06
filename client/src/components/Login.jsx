@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { api, setToken } from '../api.js';
+import PasswordInput from './PasswordInput.jsx';
 
 export default function Login({ onLogin }) {
   const [username, setUsername] = useState('');
@@ -24,7 +25,7 @@ export default function Login({ onLogin }) {
         <input className="input" value={username} onChange={(e) => setUsername(e.target.value)}
           autoComplete="username" onKeyDown={(e) => e.key === 'Enter' && submit()} />
         <label>Password</label>
-        <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+        <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)}
           autoComplete="current-password" onKeyDown={(e) => e.key === 'Enter' && submit()} />
         <button className="btn primary" onClick={submit}>Log in</button>
         <div className="err">{err}</div>

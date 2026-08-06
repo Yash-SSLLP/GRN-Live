@@ -81,7 +81,7 @@ export default function ImportModal({ grn, setGrn, catalog, idx, vendors, racks,
       // Note: new items are added to THIS GRN only. To add them to the shared
       // catalog, use the "Edit lists" tool — imports never touch the catalog.
       toast(`Imported <b>${use.length}</b> item${use.length !== 1 ? 's' : ''} as expected`, 'info');
-      onClose();
+      onClose(true); // tell the editor an import actually landed
     } catch (e) { toast(e.message, 'err'); setBusy(false); }
   }
 
@@ -168,7 +168,7 @@ export default function ImportModal({ grn, setGrn, catalog, idx, vendors, racks,
         )}
 
         <div className="modal-actions">
-          <button className="btn ghost" onClick={onClose} disabled={busy}>Cancel</button>
+          <button className="btn ghost" onClick={() => onClose()} disabled={busy}>Cancel</button>
           <button className="btn go" disabled={on === 0 || busy} onClick={commit}>
             {busy ? <><span className="spin" /> Importing…</> : `Import ${on} item${on !== 1 ? 's' : ''} as expected`}
           </button>

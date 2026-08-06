@@ -29,7 +29,10 @@ export default function Editor({ grn, setGrn, me, catalog, idx, vendors, racks, 
     }
     return false;
   }
-  const [filter, setFilter] = useState('');
+  const [filter, setFilter] = useState('');         // search box over this note
+  const [addName, setAddName] = useState('');       // what's typed in the add-an-item bar
+  const [sortKey, setSortKey] = useState('new');    // newest-added item at the TOP
+  const orderRef = useRef({ sig: '', keys: [] });   // frozen row order — see `sorted`
   const [expanded, setExpanded] = useState({});     // group key -> show its per-bin unload log
   const [addBin, setAddBin] = useState({});         // group key -> show the "add another rack + qty" form
   const [newRack, setNewRack] = useState({});       // add-rack picker value, keyed by anchor / 'e'+anchor
@@ -112,14 +115,14 @@ export default function Editor({ grn, setGrn, me, catalog, idx, vendors, racks, 
   // on its row. Idempotent — adding an item already in the note just refocuses it.
   async function addItemQuick(nameArg) {
     if (blockIfLocked()) return;
-    const name = String(nameArg ?? filter).trim();
+    const name = String(nameArg ?? addName).trim();
     if (!name) { toast('Type an item name to add', 'err'); nameRef.current?.focus(); return; }
     const before = grn.items.length;
     try {
       const g = await api('/grns/' + grn.id + '/lines/bin', { method: 'POST', body: { name } });
       setGrn(g); refreshMasters();
       const added = g.items.length > before;
-      setFilter(''); nameRef.current?.focus();
+      setAddName(''); nameRef.current?.focus();
       if (added) toast(`Added ${name} — set its rack, then tap ＋ to receive qty`, 'ok');
       else toast(`${name} is already in this note`, 'info');
     } catch (e) { toast(e.message, 'err'); }
@@ -236,6 +239,28 @@ export default function Editor({ grn, setGrn, me, catalog, idx, vendors, racks, 
   const groups = useMemo(() => groupByItem(shown), [shown]);
   const distinctCount = useMemo(() => new Set(all.map((it) => norm(it.name))).size, [all]);
 
+  // The row ORDER is recomputed only when the sort mode changes or the set of
+  // items changes (add / delete / filter) — never when a qty or rack is edited.
+  // Without this, saving a value under "shortage first" would re-sort mid-entry
+  // and slide the row out from under the cursor.
+  const sorted = useMemo(() => {
+    const sig = sortKey + '\u0000' + groups.map((g) => g.key).join('\u0001');
+    if (orderRef.current.sig !== sig) {
+      orderRef.current = { sig, keys: [...groups].sort(CMP[sortKey] || CMP.new).map((g) => g.key) };
+    }
+    const pos = new Map(orderRef.current.keys.map((k, i) => [k, i]));
+    return [...groups].sort((a, b) => (pos.get(a.key) ?? 1e9) - (pos.get(b.key) ?? 1e9));
+  }, [groups, sortKey]);
+
+  const clickHead = useCallback((h) => {
+    const cyc = HEAD_CYCLE[h];
+    setSortKey((k) => cyc[(cyc.indexOf(k) + 1) % cyc.length]);
+  }, []);
+  // Props every EditCell in the table needs. Spread rather than wrapped in a
+  // local component — a component defined here would be a new type each render
+  // and React would remount every cell.
+  const ecProps = { locked, editing, setEditing, commitEdit };
+
   // Add another rack (bin) to an item. The rack is picked from the list (held in
   // newRack[key]); the quantity is OPTIONAL — leave it blank to add an empty rack
   // slot (0 received) and unload into it later, or enter a qty to receive now.
@@ -259,18 +284,6 @@ export default function Editor({ grn, setGrn, me, catalog, idx, vendors, racks, 
     } catch (e) { toast(e.message, 'err'); }
   }
 
-  const EditCell = ({ line, field, children, right }) => {
-    const isEditing = editing && editing.lineId === line.id && editing.field === field;
-    if (locked) return <span>{children}</span>;
-    if (!isEditing) return <span style={{ cursor: 'pointer' }} title="Click to edit" onClick={() => setEditing({ lineId: line.id, field })}>{children}</span>;
-    const cur = field === 'received' ? line.received : field === 'expected' ? (line.expected == null ? '' : line.expected) : (line.rack || '');
-    return (
-      <input autoFocus defaultValue={cur} type={field === 'rack' ? 'text' : 'number'}
-        style={{ width: 90, fontFamily: 'var(--mono)', fontWeight: 700, border: '2px solid var(--amber)', borderRadius: 6, padding: '4px 7px', textAlign: right ? 'right' : 'left' }}
-        onBlur={(e) => { commitEdit(line.id, field, e.target.value); }}
-        onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') setEditing(null); }} />
-    );
-  };
   function commitEdit(lineId, field, value) {
     setEditing(null);
     const body = {};
@@ -318,28 +331,57 @@ export default function Editor({ grn, setGrn, me, catalog, idx, vendors, racks, 
         {!locked && (
           <div className="addone">
             <div className="fld" style={{ flex: 1 }}>
-              <label>Item — search this note, or type a new one to add {vendorScoped && <span style={{ color: 'var(--muted-2)', fontWeight: 600 }}>· {vendorItems.length} for {vendor}</span>}</label>
-              <Combo value={filter} options={itemNames} allowFree big width="100%" addLabel="Add"
-                placeholder={vendorScoped ? `Search ${vendor} items, or type a new one…` : 'Search items, or type a new one…'}
-                onType={(v) => setFilter(v)} onChange={(v) => { if (!v) { setFilter(''); return; } addItemQuick(v); }} />
+              <label>Add an item to this note {vendorScoped && <span style={{ color: 'var(--muted-2)', fontWeight: 600 }}>· {vendorItems.length} for {vendor}</span>}</label>
+              <Combo value={addName} options={itemNames} allowFree big width="100%" addLabel="Add"
+                placeholder={vendorScoped ? `Pick or type a ${vendor} item…` : 'Pick or type an item…'}
+                onType={(v) => setAddName(v)} onChange={(v) => { if (!v) { setAddName(''); return; } addItemQuick(v); }} />
             </div>
-            <button className="btn go" onClick={() => addItemQuick(filter)}>＋ Add</button>
+            <button className="btn go" onClick={() => addItemQuick(addName)}>＋ Add</button>
           </div>
         )}
 
         <div className="list-tools">
+          {/* Searching is separate from adding on purpose — typing in the bar
+              above creates an item, which is not what a search should ever do. */}
+          <div className="find">
+            <input className="input findbox" type="search" value={filter}
+              placeholder="Search particulars or rack in this note…"
+              onChange={(e) => setFilter(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Escape') setFilter(''); }} />
+            {filter && <button className="findclear" title="Clear search" onClick={() => setFilter('')}>✕</button>}
+          </div>
+          <label className="sortwrap">
+            <span>Sort</span>
+            <select className="input sortsel" value={sortKey} onChange={(e) => setSortKey(e.target.value)}>
+              {SORT_MODES.map((s) => <option key={s.k} value={s.k}>{s.label}</option>)}
+            </select>
+          </label>
+          <div className="spacer" />
           <div className="count-note">{all.length ? (f ? `${groups.length} of ${distinctCount} shown` : `${distinctCount} item${distinctCount !== 1 ? 's' : ''} · ${all.length} bin line${all.length !== 1 ? 's' : ''}`) : ''}</div>
         </div>
 
         <div>
           {!all.length ? (
             <div className="items-empty">No items yet. Add them above, or use <b>Import list</b> to pull them from the vendor's PDF (matched against your catalog). Find the same item again in the vehicle? Add it again — the quantity stacks.</div>
+          ) : !sorted.length ? (
+            <div className="items-empty">No item matches “{filter}”. <button className="linkbtn" onClick={() => setFilter('')}>Clear search</button></div>
           ) : (
             <div className="items-scroll">
             <table className="items">
-              <thead><tr><th className="it-idx">#</th><th>Particulars</th><th>Rack</th><th className="r">Expected</th><th className="r">Received</th><th className="r">Action</th></tr></thead>
+              <colgroup>
+                <col className="c-idx" /><col className="c-name" /><col className="c-rack" />
+                <col className="c-exp" /><col className="c-rec" /><col className="c-act" />
+              </colgroup>
+              <thead><tr>
+                <SortHead h="idx" cls="it-idx" sortKey={sortKey} onSort={clickHead} title="Row number — click to flip entry order">#</SortHead>
+                <SortHead h="name" sortKey={sortKey} onSort={clickHead} title="Sort by item name">Particulars</SortHead>
+                <SortHead h="rack" sortKey={sortKey} onSort={clickHead} title="Sort by rack code">Rack</SortHead>
+                <th className="r">Expected</th>
+                <SortHead h="rec" cls="r" sortKey={sortKey} onSort={clickHead} title="Sort shortages to the top">Received</SortHead>
+                <th className="r">Action</th>
+              </tr></thead>
               <tbody>
-                {groups.map((grp, gi) => {
+                {sorted.map((grp, gi) => {
                   const totalRec = grp.lines.reduce((s, l) => s + (+l.received || 0), 0);
                   const expLines = grp.lines.filter((l) => l.expected != null);
                   const hasGrpExp = expLines.length > 0;
@@ -349,7 +391,7 @@ export default function Editor({ grn, setGrn, me, catalog, idx, vendors, racks, 
                   const anchor = grp.key;
                   return (
                     <React.Fragment key={grp.key}>
-                    <tr>
+                    <tr className={expanded[anchor] ? 'is-open' : undefined}>
                       <td className="it-idx">{gi + 1}</td>
                       <td className="it-name" data-label="Item">{grp.name}</td>
                       {/* Inline rack selector — pick a predefined rack straight from the row.
@@ -357,16 +399,15 @@ export default function Editor({ grn, setGrn, me, catalog, idx, vendors, racks, 
                       <td data-label="Rack">
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
                           {grp.lines.map((l) => (
-                            <RackSelect key={l.id} value={l.rack || ''} racks={racks} width={150} disabled={locked}
+                            <RackSelect key={l.id} value={l.rack || ''} racks={racks} width="100%" disabled={locked}
                               onChange={(v) => { if (v !== (l.rack || '')) patchLine(l.id, { rack: v }); }} />
                           ))}
                           {locked ? null : addBin[anchor] ? (
-                            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                              <RackSelect value={newRack[anchor] || ''} racks={racks} width={150} placeholder="pick new rack"
+                            <div className="rack-add">
+                              <RackSelect value={newRack[anchor] || ''} racks={racks} width="100%" placeholder="pick new rack"
                                 onChange={(v) => setNewRack((m) => ({ ...m, [anchor]: v }))} />
-                              <input id={'gq-' + anchor} type="number" min="0" step="any" placeholder="qty (optional)"
-                                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addToItem(grp.name, anchor, 'gq-' + anchor); } if (e.key === 'Escape') setAddBin((m) => ({ ...m, [anchor]: false })); }}
-                                style={{ width: 110, fontFamily: 'var(--mono)', fontWeight: 700, border: '1.5px solid var(--line)', borderRadius: 6, padding: '5px 7px' }} />
+                              <input id={'gq-' + anchor} className="qtybox" type="number" min="0" step="any" placeholder="qty (optional)"
+                                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addToItem(grp.name, anchor, 'gq-' + anchor); } if (e.key === 'Escape') setAddBin((m) => ({ ...m, [anchor]: false })); }} />
                               <button className="btn go sm" title="Add this rack — with a qty, or leave qty blank to fill it later" onClick={() => addToItem(grp.name, anchor, 'gq-' + anchor)}>Add rack</button>
                               <button className="iconbtn" title="Cancel" onClick={() => { setAddBin((m) => ({ ...m, [anchor]: false })); setNewRack((m) => { const n = { ...m }; delete n[anchor]; return n; }); }}>✕</button>
                             </div>
@@ -380,7 +421,7 @@ export default function Editor({ grn, setGrn, me, catalog, idx, vendors, racks, 
                       <td className="r" data-label="Expected">
                         <div style={stackR}>
                           {grp.lines.map((l) => (
-                            <EditCell key={l.id} line={l} field="expected" right>
+                            <EditCell key={l.id} line={l} field="expected" right {...ecProps}>
                               <span className="it-exp" title="Click to set the expected qty">{l.expected == null ? '—' : nf.format(l.expected)}</span>
                             </EditCell>
                           ))}
@@ -391,18 +432,18 @@ export default function Editor({ grn, setGrn, me, catalog, idx, vendors, racks, 
                         <div style={stackR}>
                           {grp.lines.map((l) => (
                             <div key={l.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
-                              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                                <EditCell line={l} field="received" right>
+                              <div className="recline">
+                                <EditCell line={l} field="received" right {...ecProps}>
                                   <span className="it-qty" title="Click to correct the received total">{nf.format(l.received || 0)}</span>
                                 </EditCell>
                                 {!locked && <button className="iconbtn plus" title="Add qty to this rack (stacks — does not replace)"
                                   onClick={() => setQtyFor((id) => id === l.id ? null : l.id)}>＋</button>}
                               </div>
                               {qtyFor === l.id && (
-                                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                                  <input id={'lq-' + l.id} autoFocus type="number" min="0" step="any" placeholder="+ qty"
+                                <div className="recline">
+                                  <input id={'lq-' + l.id} autoFocus className="qtybox" type="number" min="0" step="any" placeholder="+ qty"
                                     onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); doQuickAdd(l.id, 'lq-' + l.id); } if (e.key === 'Escape') setQtyFor(null); }}
-                                    style={{ width: 62, fontFamily: 'var(--mono)', fontWeight: 700, border: '1.5px solid var(--green-dk)', borderRadius: 6, padding: '4px 7px', textAlign: 'right' }} />
+                                    style={{ width: 62, borderColor: 'var(--green-dk)' }} />
                                   <button className="btn go sm" onClick={() => doQuickAdd(l.id, 'lq-' + l.id)}>Add</button>
                                 </div>
                               )}
@@ -438,9 +479,9 @@ export default function Editor({ grn, setGrn, me, catalog, idx, vendors, racks, 
                                     ? <span> — {l.log.map((x) => `+${nf.format(x.qty)} @ ${fmtTime(x.at)}`).join(', ')}</span>
                                     : <span style={{ opacity: .7 }}> — no unload log yet</span>}
                                 </span>
-                                {!locked && <><input id={'eq-' + l.id} type="number" min="0" step="any" placeholder="+ qty"
+                                {!locked && <><input id={'eq-' + l.id} className="qtybox" type="number" min="0" step="any" placeholder="+ qty"
                                   onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); doQuickAdd(l.id, 'eq-' + l.id); } }}
-                                  style={{ width: 70, fontFamily: 'var(--mono)', fontWeight: 700, border: '1.5px solid var(--line)', borderRadius: 6, padding: '4px 7px', textAlign: 'right' }} />
+                                  style={{ width: 70 }} />
                                 <button className="btn go sm" title="Add qty to this rack (stacks)" onClick={() => doQuickAdd(l.id, 'eq-' + l.id)}>Add qty</button></>}
                               </div>
                             ))}
@@ -449,9 +490,9 @@ export default function Editor({ grn, setGrn, me, catalog, idx, vendors, racks, 
                               <span style={{ fontWeight: 600 }}>Add another rack:</span>
                               <RackSelect value={newRack['e' + anchor] || ''} racks={racks} width={150} placeholder="pick rack"
                                 onChange={(v) => setNewRack((m) => ({ ...m, ['e' + anchor]: v }))} />
-                              <input id={'egq-' + anchor} type="number" min="0" step="any" placeholder="qty (optional)"
+                              <input id={'egq-' + anchor} className="qtybox" type="number" min="0" step="any" placeholder="qty (optional)"
                                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addToItem(grp.name, 'e' + anchor, 'egq-' + anchor); } }}
-                                style={{ width: 110, fontFamily: 'var(--mono)', fontWeight: 700, border: '1.5px solid var(--line)', borderRadius: 6, padding: '4px 7px' }} />
+                                style={{ width: 110 }} />
                               <button className="btn go sm" onClick={() => addToItem(grp.name, 'e' + anchor, 'egq-' + anchor)}>Add rack</button>
                             </div>}
                           </div>
@@ -476,7 +517,11 @@ export default function Editor({ grn, setGrn, me, catalog, idx, vendors, racks, 
         </div>
       </div>
 
-      {showImport && <ImportModal grn={grn} setGrn={setGrn} catalog={catalog} idx={idx} vendors={vendors} racks={racks} me={me} refreshMasters={refreshMasters} onClose={() => setShowImport(false)} />}
+      {/* An import appends the whole vendor list at once. Under "newest first"
+          that would render it back-to-front, so drop to entry order to keep the
+          rows in the same sequence as the vendor's document. */}
+      {showImport && <ImportModal grn={grn} setGrn={setGrn} catalog={catalog} idx={idx} vendors={vendors} racks={racks} me={me} refreshMasters={refreshMasters}
+        onClose={(imported) => { setShowImport(false); if (imported) setSortKey('old'); }} />}
 
       {splitOpen && (
         <div className="modal-bg show" onClick={(e) => { if (!splitting && e.target.classList.contains('modal-bg')) setSplitOpen(false); }}>
@@ -540,10 +585,92 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
 // Group line records by item (one display row per item, its bins underneath).
 function groupByItem(lines) {
   const map = new Map();
-  for (const it of lines) {
+  lines.forEach((it, i) => {
     const key = norm(it.name);
-    if (!map.has(key)) map.set(key, { key, name: it.name, lines: [] });
+    // `ord` = where this item's FIRST line sits in the server array. The server
+    // pushes new lines onto the end, so a bigger ord means added more recently.
+    // Keying off the first line means adding another rack to an item already in
+    // the note doesn't yank it back to the top — only genuinely new items move.
+    if (!map.has(key)) map.set(key, { key, name: it.name, ord: i, lines: [] });
     map.get(key).lines.push(it);
-  }
+  });
   return [...map.values()];
+}
+
+const SORT_MODES = [
+  { k: 'new', label: 'Newest first' },
+  { k: 'old', label: 'Oldest first' },
+  { k: 'name', label: 'Item A–Z' },
+  { k: 'rack', label: 'Rack code' },
+  { k: 'short', label: 'Shortage first' },
+];
+// numeric so A/2 sorts before A/10; base sensitivity so case never matters.
+const COLL = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+// Lowest rack code across an item's bins; null when it has no rack yet.
+function grpRack(g) {
+  let best = null;
+  for (const l of g.lines) {
+    const r = (l.rack || '').trim();
+    if (r && (best === null || COLL.compare(r, best) < 0)) best = r;
+  }
+  return best;
+}
+// received - expected across the item's bins; null when nothing is expected.
+function grpVar(g) {
+  if (!g.lines.some((l) => l.expected != null)) return null;
+  let exp = 0, rec = 0;
+  for (const l of g.lines) { if (l.expected != null) exp += +l.expected || 0; rec += +l.received || 0; }
+  return rec - exp;
+}
+// Every comparator is tie-broken by ord, so ordering is always deterministic.
+const CMP = {
+  new: (a, b) => b.ord - a.ord,
+  old: (a, b) => a.ord - b.ord,
+  name: (a, b) => COLL.compare(a.name, b.name) || (a.ord - b.ord),
+  rack: (a, b) => {
+    const ra = grpRack(a), rb = grpRack(b);
+    if (ra === null || rb === null) return (ra === null) - (rb === null) || (a.ord - b.ord);
+    return COLL.compare(ra, rb) || (a.ord - b.ord);
+  },
+  short: (a, b) => {
+    const va = grpVar(a), vb = grpVar(b);
+    if (va === null || vb === null) return (va === null) - (vb === null) || (a.ord - b.ord);
+    return va - vb || (a.ord - b.ord);
+  },
+};
+// Which sort each clickable header owns, and the arrow it shows.
+const HEAD_CYCLE = { idx: ['new', 'old'], name: ['name'], rack: ['rack'], rec: ['short'] };
+const HEAD_ARROW = { new: '▾', old: '▴', name: '▴', rack: '▴', short: '▾' };
+
+// Sortable column header. Defined at module scope (not inside Editor) so its
+// component identity is stable across renders and React updates the <th> in
+// place instead of remounting the whole header row.
+function SortHead({ h, cls, title, sortKey, onSort, children }) {
+  const on = HEAD_CYCLE[h].includes(sortKey);
+  return (
+    <th className={(cls || '') + ' sortable' + (on ? ' on' : '')} title={title}
+      aria-sort={on ? (HEAD_ARROW[sortKey] === '▴' ? 'ascending' : 'descending') : 'none'}
+      onClick={() => onSort(h)}>
+      {children}<span className="sarr">{on ? HEAD_ARROW[sortKey] : ''}</span>
+    </th>
+  );
+}
+
+// One cell value: a click swaps the text for an input. .cellval and .celledit
+// are sized identically in CSS, so the swap shifts nothing.
+// Also module scope — as a nested component it was remounted on every render,
+// which threw away whatever was half-typed whenever a live update arrived.
+function EditCell({ line, field, children, right, locked, editing, setEditing, commitEdit }) {
+  const isEditing = editing && editing.lineId === line.id && editing.field === field;
+  const cls = 'cellval' + (right ? '' : ' l');
+  if (locked) return <span className={cls}>{children}</span>;
+  if (!isEditing) return <span className={cls} title="Click to edit" onClick={() => setEditing({ lineId: line.id, field })}>{children}</span>;
+  const cur = field === 'received' ? line.received : field === 'expected' ? (line.expected == null ? '' : line.expected) : (line.rack || '');
+  return (
+    <input autoFocus defaultValue={cur} className="celledit" type={field === 'rack' ? 'text' : 'number'}
+      style={{ textAlign: right ? 'right' : 'left' }}
+      onBlur={(e) => { commitEdit(line.id, field, e.target.value); }}
+      onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') setEditing(null); }} />
+  );
 }

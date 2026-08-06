@@ -3,9 +3,35 @@ import { nf, fmtDate, printGrnDoc } from '../match.js';
 import { api, toast } from '../api.js';
 import { can } from '../permissions.js';
 
+// Sort modes for the receiving desk. Every field used here already comes down
+// with the list payload, so sorting stays client-side.
+const SORTS = [
+  { k: 'new', label: 'Newest first' },
+  { k: 'old', label: 'Oldest first' },
+  { k: 'date-desc', label: 'Date — new to old' },
+  { k: 'date-asc', label: 'Date — old to new' },
+  { k: 'vendor', label: 'Vendor A–Z' },
+  { k: 'qty', label: 'Received qty — high to low' },
+  { k: 'updated', label: 'Recently updated' },
+];
+// Newest number first, but split letters ascending within one number:
+// GRN-002, then GRN-001, GRN-001 (A), GRN-001 (B). suffix is '' or 'A'/'B'/….
+const bySeq = (a, b) => (b.seq || 0) - (a.seq || 0) || (a.suffix || '').localeCompare(b.suffix || '');
+const ts = (d) => { const t = d ? new Date(d).getTime() : 0; return isNaN(t) ? 0 : t; };
+const CMP = {
+  new: bySeq,
+  old: (a, b) => -bySeq(a, b),
+  'date-desc': (a, b) => ts(b.date) - ts(a.date) || bySeq(a, b),
+  'date-asc': (a, b) => ts(a.date) - ts(b.date) || -bySeq(a, b),
+  vendor: (a, b) => (a.vendor || '').localeCompare(b.vendor || '', undefined, { sensitivity: 'base' }) || bySeq(a, b),
+  qty: (a, b) => (b.totalQty || 0) - (a.totalQty || 0) || bySeq(a, b),
+  updated: (a, b) => ts(b.updatedAt) - ts(a.updatedAt) || bySeq(a, b),
+};
+
 export default function Dashboard({ list, vendors, me, onOpen, onNew }) {
   const [q, setQ] = useState('');
   const [cat, setCat] = useState('all'); // stat-box filter: all | open | received | transit | purchased
+  const [sort, setSort] = useState('new');
   const [printing, setPrinting] = useState(null); // id currently being fetched for print
 
   const isTomb = (g) => g.status === 'deleted';       // a deleted number's tombstone
@@ -49,8 +75,9 @@ export default function Dashboard({ list, vendors, me, onOpen, onNew }) {
       || (g.grnNo || '').toUpperCase().includes(t)
       || (g.vendor || '').toUpperCase().includes(t)
       || (g.billNo || '').toUpperCase().includes(t)
-      || (g.purchaseNo || '').toUpperCase().includes(t)));
-  }, [list, q, cat]);
+      || (g.purchaseNo || '').toUpperCase().includes(t)))
+      .sort(CMP[sort] || CMP.new); // .filter() already returned a fresh array
+  }, [list, q, cat, sort]);
 
   return (
     <section>
@@ -78,6 +105,12 @@ export default function Dashboard({ list, vendors, me, onOpen, onNew }) {
 
       <div className="search-row">
         <input className="input" placeholder="Search by GRN no, vendor or bill no…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <label className="sortwrap">
+          <span>Sort</span>
+          <select className="input sortsel" value={sort} onChange={(e) => setSort(e.target.value)}>
+            {SORTS.map((s) => <option key={s.k} value={s.k}>{s.label}</option>)}
+          </select>
+        </label>
       </div>
 
       <div className="grn-list">

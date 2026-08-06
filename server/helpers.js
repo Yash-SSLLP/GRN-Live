@@ -34,6 +34,8 @@ function shapeGrn(g) {
     purchaseNo: g.purchaseNo || '',
     consignmentId: g.consignmentId || '',
     status: g.status,
+    // The dashboard sorts by this, so it must survive the optimistic list patch.
+    updatedAt: g.updatedAt,
     items: (g.items || []).map((l) => ({
       id: l._id.toString(),
       name: l.name,

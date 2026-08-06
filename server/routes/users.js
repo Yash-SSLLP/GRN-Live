@@ -1,4 +1,5 @@
 const express = require('express');
+const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const { authRequired } = require('../middleware/auth');
 const { perm, effectivePerms, roleDefault, sanitize, AREAS } = require('../permissions');
@@ -21,6 +22,58 @@ function shape(u) {
 router.get('/', perm('users', 'view'), async (req, res) => {
   const users = await User.find({}).sort({ createdAt: 1 }).lean();
   res.json(users.map(shape));
+});
+
+const MIN_PASSWORD = 8;
+const ROLES = ['admin', 'purchase', 'dock'];
+
+// Edit an existing user: rename, change role, or set a new password.
+// Passwords are bcrypt hashes and cannot be read back, so there is no "show the
+// old one" — an admin sets a fresh password and passes it to the user.
+router.patch('/:id', perm('users', 'add'), async (req, res) => {
+  const user = await User.findById(req.params.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+  const { username, full_name, role: r, password } = req.body || {};
+  const isSelf = req.params.id === req.user.id;
+  const update = {};
+
+  if (username !== undefined) {
+    const u = String(username).trim();
+    if (!u) return res.status(400).json({ error: 'Username cannot be empty.' });
+    if (u !== user.username) {
+      const taken = await User.findOne({ username: u, _id: { $ne: user._id } });
+      if (taken) return res.status(409).json({ error: 'That username is taken.' });
+      update.username = u;
+    }
+  }
+  if (full_name !== undefined) update.fullName = String(full_name).trim();
+
+  if (r !== undefined && r !== user.role) {
+    if (!ROLES.includes(r)) return res.status(400).json({ error: 'Invalid role.' });
+    // Changing your own role can only end badly — you could lock yourself out
+    // mid-request. Same reasoning as the self-delete guard below.
+    if (isSelf) return res.status(400).json({ error: "You can't change your own role." });
+    // Never let the last admin be demoted, or nobody can administer the app.
+    if (user.role === 'admin') {
+      const admins = await User.countDocuments({ role: 'admin' });
+      if (admins <= 1) return res.status(400).json({ error: 'This is the only admin — promote someone else first.' });
+    }
+    update.role = r;
+  }
+
+  if (password !== undefined && password !== '') {
+    if (String(password).length < MIN_PASSWORD) return res.status(400).json({ error: `Password too short (min ${MIN_PASSWORD} characters).` });
+    update.passwordHash = await bcrypt.hash(String(password), 10);
+  }
+
+  const ops = Object.keys(update).length ? { $set: update } : {};
+  // Admins are never permission-limited (see the perms route below), so drop any
+  // stale per-user override when someone is promoted.
+  if (update.role === 'admin') ops.$unset = { perms: 1 };
+  if (Object.keys(ops).length) await User.updateOne({ _id: user._id }, ops);
+
+  const fresh = await User.findById(user._id).lean();
+  res.json(shape(fresh));
 });
 
 // Set (or reset) a user's per-user permission override. Admin-level action.

@@ -39,19 +39,22 @@ export default function App() {
   // Re-sync my own role/permissions from the server on load, so an admin's
   // change to my access shows up (buttons appear/disappear) after a refresh
   // without a full logout. The server enforces live regardless of this.
-  useEffect(() => {
-    if (!me || !getToken()) return;
-    api('/auth/me').then((r) => {
+  // Also called after an admin edits their own account, so a rename or role
+  // change lands in the topbar without a re-login.
+  function refreshMe() {
+    if (!getToken()) return Promise.resolve();
+    return api('/auth/me').then((r) => {
       const u = r && r.user; if (!u) return;
       setMe((prev) => {
         if (!prev) return prev;
-        const merged = { ...prev, role: u.role, perms: u.perms, name: u.name ?? prev.name };
+        const merged = { ...prev, role: u.role, perms: u.perms, name: u.name ?? prev.name, username: u.username ?? prev.username };
         if (JSON.stringify(merged) === JSON.stringify(prev)) return prev;
         localStorage.setItem('grn_user', JSON.stringify(merged));
         return merged;
       });
     }).catch(() => {});
-  }, []);
+  }
+  useEffect(() => { if (me) refreshMe(); }, []);
 
   async function refreshMasters() {
     // Fetch each list independently so one failing (e.g. an old server without
@@ -109,7 +112,9 @@ export default function App() {
   function setGrn(g) {
     setCurrent(g);
     if (g.seq == null) return; // unsubmitted draft — kept out of the dashboard list
-    setList((L) => { const i = L.findIndex((x) => x.id === g.id); const summary = { id: g.id, seq: g.seq, grnNo: g.grnNo, date: g.date, vendor: g.vendor, billNo: g.billNo, status: g.status, items: g.items.length, totalQty: g.items.reduce((s, it) => s + (+it.received || 0), 0), totalExpected: g.items.reduce((s, it) => s + (it.expected != null ? +it.expected || 0 : 0), 0) }; if (i >= 0) { const c = L.slice(); c[i] = summary; return c; } return [summary, ...L]; });
+    // Keep every field the dashboard card renders — purchaseNo and consignmentId
+    // included, or the PO number and "split" chip vanish until the next reload.
+    setList((L) => { const i = L.findIndex((x) => x.id === g.id); const summary = { id: g.id, seq: g.seq, suffix: g.suffix, baseNo: g.baseNo, grnNo: g.grnNo, date: g.date, vendor: g.vendor, billNo: g.billNo, purchaseNo: g.purchaseNo, consignmentId: g.consignmentId, status: g.status, updatedAt: g.updatedAt, items: g.items.length, totalQty: g.items.reduce((s, it) => s + (+it.received || 0), 0), totalExpected: g.items.reduce((s, it) => s + (it.expected != null ? +it.expected || 0 : 0), 0) }; if (i >= 0) { const c = L.slice(); c[i] = summary; return c; } return [summary, ...L]; });
   }
 
   if (!ready) return null;
@@ -118,7 +123,7 @@ export default function App() {
   return (
     <div>
       <div className="topbar">
-        <div className="brand"><span className="mark" />GRN&nbsp;Desk <small>goods received · build&nbsp;Jul16-12</small></div>
+        <div className="brand"><span className="mark" />GRN&nbsp;Desk <small>goods received · build&nbsp;Jul12-20</small></div>
         <div className="spacer" />
         <button className="btn ghost sm navtoggle" onClick={() => setNavOpen((o) => !o)} aria-label="Menu" aria-expanded={navOpen}>{navOpen ? '✕' : '☰'}</button>
         <nav className={'topnav' + (navOpen ? ' open' : '')} onClick={() => setNavOpen(false)}>
@@ -143,7 +148,7 @@ export default function App() {
       {modal === 'reports' && <ReportsModal vendors={vendors} catalog={catalog} onClose={() => setModal(null)} />}
       {modal === 'master' && <MasterModal catalog={catalog} vendors={vendors} racks={racks} me={me} refreshMasters={refreshMasters} onClose={() => setModal(null)} />}
       {modal === 'manage' && <ManageModal catalog={catalog} vendors={vendors} racks={racks} me={me} refreshMasters={refreshMasters} onClose={() => setModal(null)} />}
-      {modal === 'users' && <UsersModal me={me} onEditPerms={can(me, 'users', 'add') ? ((id) => { setPermUser(id); setModal('perms'); }) : null} onClose={() => setModal(null)} />}
+      {modal === 'users' && <UsersModal me={me} refreshMe={refreshMe} onEditPerms={can(me, 'users', 'add') ? ((id) => { setPermUser(id); setModal('perms'); }) : null} onClose={() => setModal(null)} />}
       {modal === 'perms' && <PermissionsModal me={me} initialUserId={permUser} onClose={() => { setPermUser(null); setModal(null); }} />}
       {modal === 'password' && <PasswordModal onClose={() => setModal(null)} />}
     </div>
